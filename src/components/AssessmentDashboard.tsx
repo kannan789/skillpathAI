@@ -37,6 +37,7 @@ export default function AssessmentDashboard({ assessmentId }: AssessmentDashboar
   const [inputText, setInputText] = useState('');
   const [isSending, setIsSending] = useState(false);
   const [isGeneratingPlan, setIsGeneratingPlan] = useState(false);
+  const [isInterviewing, setIsInterviewing] = useState(false);
   const chatEndRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -75,20 +76,24 @@ export default function AssessmentDashboard({ assessmentId }: AssessmentDashboar
     setIsSending(true);
 
     try {
-      // Add user message
-      await addDoc(collection(db, 'assessments', assessmentId, 'messages'), {
+      // Create user message object
+      const userMessage: Message = {
         sender: 'user',
         text,
         timestamp: new Date()
-      });
+      };
 
-      // Get AI response
-      const aiResponse = await getAgentResponse(messages, text, assessment);
+      // Add user message to DB
+      await addDoc(collection(db, 'assessments', assessmentId, 'messages'), userMessage);
 
-      // Add AI message
+      // Get AI response using current messages + new user message
+      const currentMessagesPlusNew = [...messages, userMessage];
+      const aiResponseText = await getAgentResponse(currentMessagesPlusNew, text, assessment);
+
+      // Add AI message to DB
       await addDoc(collection(db, 'assessments', assessmentId, 'messages'), {
         sender: 'ai',
-        text: aiResponse,
+        text: aiResponseText,
         timestamp: new Date()
       });
     } catch (err) {
@@ -102,11 +107,13 @@ export default function AssessmentDashboard({ assessmentId }: AssessmentDashboar
     if (!assessment || isGeneratingPlan) return;
     setIsGeneratingPlan(true);
     try {
-      const plan = await generateLearningPlan(assessment);
+      const transcript = messages.map(m => `${m.sender}: ${m.text}`).join('\n');
+      const plan = await generateLearningPlan(assessment, transcript);
       await updateDoc(doc(db, 'assessments', assessmentId), {
         learningPlan: plan,
         updatedAt: new Date().toISOString()
       });
+      setIsInterviewing(false);
     } catch (err) {
       console.error("Plan generation error:", err);
     } finally {
@@ -282,15 +289,37 @@ export default function AssessmentDashboard({ assessmentId }: AssessmentDashboar
 
             {!assessment.learningPlan ? (
               <div className="flex flex-col items-center justify-center py-12 bg-slate-50 rounded-2xl border border-dashed border-slate-200">
-                <Brain className="w-12 h-12 text-slate-300 mb-4" />
-                <p className="text-slate-500 text-sm mb-4">No learning plan generated yet.</p>
-                <button 
-                  onClick={handleGeneratePlan}
-                  disabled={isGeneratingPlan}
-                  className="px-6 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-full text-sm font-bold shadow-lg shadow-indigo-200 transition-all active:scale-95 disabled:opacity-50"
-                >
-                  {isGeneratingPlan ? "Analyzing Skills..." : "Generate Personalized Plan"}
-                </button>
+                <Brain className={cn("w-12 h-12 mb-4", isInterviewing ? "text-indigo-500 animate-pulse" : "text-slate-300")} />
+                <p className="text-slate-500 text-sm mb-4">
+                  {isInterviewing 
+                    ? "Technical assessment in progress. Check the chat to answer questions." 
+                    : "Ready to verify your skills?"}
+                </p>
+                <div className="flex gap-4">
+                  {!isInterviewing ? (
+                    <button 
+                      onClick={() => {
+                        setIsInterviewing(true);
+                        addDoc(collection(db, 'assessments', assessmentId, 'messages'), {
+                          sender: 'ai',
+                          text: "Great! Let's start the technical assessment. I'll ask you a few conceptual questions per skill. Ready for the first one?",
+                          timestamp: new Date()
+                        });
+                      }}
+                      className="px-6 py-2 bg-slate-900 hover:bg-slate-800 text-white rounded-full text-sm font-bold shadow-lg transition-all active:scale-95"
+                    >
+                      Start Interview
+                    </button>
+                  ) : (
+                    <button 
+                      onClick={handleGeneratePlan}
+                      disabled={isGeneratingPlan}
+                      className="px-6 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-full text-sm font-bold shadow-lg shadow-indigo-200 transition-all active:scale-95 disabled:opacity-50"
+                    >
+                      {isGeneratingPlan ? "Evaluating & Building Plan..." : "Finish Interview & Build Plan"}
+                    </button>
+                  )}
+                </div>
               </div>
             ) : (
               <div className="grid grid-cols-1 md:grid-cols-3 gap-8 relative">

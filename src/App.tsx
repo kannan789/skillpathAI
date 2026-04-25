@@ -18,7 +18,9 @@ import {
   CirclePlay,
   Github,
   Loader2,
-  Target
+  Target,
+  TrendingUp,
+  CheckCircle2
 } from 'lucide-react';
 import { cn } from './lib/utils';
 import { parseResumeAndJD } from './lib/gemini';
@@ -29,9 +31,58 @@ export default function App() {
   const [loading, setLoading] = useState(true);
   const [resume, setResume] = useState('');
   const [jobDesc, setJobDesc] = useState('');
+  const [fileName, setFileName] = useState<string | null>(null);
   const [isProcessing, setIsProcessing] = useState(false);
+  const [isUploading, setIsUploading] = useState(false);
   const [activeAssessmentId, setActiveAssessmentId] = useState<string | null>(null);
   const [recentAssessments, setRecentAssessments] = useState<any[]>([]);
+
+  const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    setIsUploading(true);
+    setFileName(file.name);
+    try {
+      let extractedText = '';
+      
+      if (file.type === 'application/pdf') {
+        const pdfjs = await import('pdfjs-dist');
+        pdfjs.GlobalWorkerOptions.workerSrc = `https://unpkg.com/pdfjs-dist@${pdfjs.version}/build/pdf.worker.min.mjs`;
+        
+        const arrayBuffer = await file.arrayBuffer();
+        const loadingTask = pdfjs.getDocument({ data: arrayBuffer });
+        const pdf = await loadingTask.promise;
+        let text = '';
+        for (let i = 1; i <= pdf.numPages; i++) {
+          const page = await pdf.getPage(i);
+          const content = await page.getTextContent();
+          text += content.items.map((item: any) => (item as any).str).join(' ') + '\n';
+        }
+        extractedText = text.trim();
+      } else if (file.type === 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' || file.name.endsWith('.docx')) {
+        const mammoth = await import('mammoth');
+        const arrayBuffer = await file.arrayBuffer();
+        const result = await mammoth.extractRawText({ arrayBuffer });
+        extractedText = result.value.trim();
+      } else {
+        extractedText = await file.text();
+      }
+
+      if (extractedText) {
+        setResume(extractedText);
+      } else {
+        throw new Error("Extraction yielded empty text");
+      }
+    } catch (err) {
+      console.error("Upload error:", err);
+      alert("Failed to parse resume. Please try pasting the text manually.");
+      setFileName(null);
+    } finally {
+      setIsUploading(false);
+      if (e.target) e.target.value = ''; // Reset input
+    }
+  };
 
   useEffect(() => {
     const unsub = onAuthStateChanged(auth, (u) => {
@@ -176,30 +227,86 @@ export default function App() {
             </div>
 
             <form onSubmit={handleStartAssessment} className="space-y-6">
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+              <div className="space-y-6">
+                {/* Resume Section with Prominent Upload */}
                 <div className="space-y-4">
-                  <label className="flex items-center gap-2 text-xs font-black uppercase text-slate-400 tracking-widest">
-                    <FileText className="w-4 h-4" />
-                    Your Resume
-                  </label>
-                  <textarea 
-                    placeholder="Paste resume text here..."
-                    value={resume}
-                    onChange={(e) => setResume(e.target.value)}
-                    className="w-full h-80 p-6 bg-white rounded-3xl border border-slate-200 outline-none focus:border-indigo-400 focus:ring-4 focus:ring-indigo-50 transition-all resize-none text-sm leading-relaxed"
-                  />
+                  <div className="flex items-center justify-between">
+                    <label className="flex items-center gap-2 text-xs font-black uppercase text-slate-400 tracking-widest">
+                      <FileText className="w-4 h-4" />
+                      1. Your Resume
+                    </label>
+                  </div>
+                  
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                    <div className="relative group">
+                      <input 
+                        type="file" 
+                        accept=".txt,.md,.pdf,.docx" 
+                        onChange={handleFileUpload}
+                        className="absolute inset-0 w-full h-full opacity-0 cursor-pointer z-10"
+                      />
+                      <div className={cn(
+                        "h-full min-h-[160px] border-2 border-dashed rounded-3xl flex flex-col items-center justify-center p-6 transition-all",
+                        fileName ? "bg-indigo-50 border-indigo-200" : "bg-white border-slate-200 group-hover:border-indigo-300 group-hover:bg-slate-50"
+                      )}>
+                        {isUploading ? (
+                          <div className="flex flex-col items-center gap-2">
+                            <Loader2 className="w-8 h-8 text-indigo-600 animate-spin" />
+                            <p className="text-xs font-bold text-indigo-600">Extracting Skills...</p>
+                          </div>
+                        ) : fileName ? (
+                          <div className="flex flex-col items-center gap-2 text-center">
+                            <div className="w-12 h-12 bg-indigo-600 rounded-2xl flex items-center justify-center shadow-lg shadow-indigo-100">
+                              <CheckCircle2 className="w-6 h-6 text-white" />
+                            </div>
+                            <p className="text-sm font-bold text-slate-900 truncate max-w-[200px]">{fileName}</p>
+                            <p className="text-[10px] text-indigo-600 font-black uppercase">Ready for Analysis</p>
+                            <button 
+                              type="button"
+                              onClick={(e) => { e.preventDefault(); setFileName(null); setResume(''); }}
+                              className="mt-2 text-[10px] text-slate-400 hover:text-rose-500 font-bold uppercase tracking-wider"
+                            >
+                              Reset
+                            </button>
+                          </div>
+                        ) : (
+                          <div className="flex flex-col items-center gap-3 text-center">
+                            <div className="w-12 h-12 bg-slate-100 rounded-2xl flex items-center justify-center text-slate-400 group-hover:bg-indigo-100 group-hover:text-indigo-600 transition-colors">
+                              <TrendingUp className="w-6 h-6" />
+                            </div>
+                            <div>
+                              <p className="text-sm font-bold text-slate-900">Upload PDF or Docx</p>
+                              <p className="text-xs text-slate-400 font-medium mt-1">or drag and drop resume here</p>
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    </div>
+
+                    <div className="space-y-2">
+                      <textarea 
+                        placeholder="Alternatively, paste resume text here..."
+                        value={resume}
+                        onChange={(e) => {
+                          setResume(e.target.value);
+                          if (fileName) setFileName(null);
+                        }}
+                        className="w-full h-full min-h-[160px] p-6 bg-white rounded-3xl border border-slate-200 outline-none focus:border-indigo-400 transition-all resize-none text-xs leading-relaxed"
+                      />
+                    </div>
+                  </div>
                 </div>
 
                 <div className="space-y-4">
                   <label className="flex items-center gap-2 text-xs font-black uppercase text-slate-400 tracking-widest">
                     <Target className="w-4 h-4" />
-                    Job Description
+                    2. Target Job Description
                   </label>
                   <textarea 
                     placeholder="Paste job requirements here..."
                     value={jobDesc}
                     onChange={(e) => setJobDesc(e.target.value)}
-                    className="w-full h-80 p-6 bg-white rounded-3xl border border-slate-200 outline-none focus:border-indigo-400 focus:ring-4 focus:ring-indigo-50 transition-all resize-none text-sm leading-relaxed"
+                    className="w-full h-48 p-6 bg-white rounded-3xl border border-slate-200 outline-none focus:border-indigo-400 focus:ring-4 focus:ring-indigo-50 transition-all resize-none text-sm leading-relaxed"
                   />
                 </div>
               </div>
