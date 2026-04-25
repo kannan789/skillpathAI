@@ -1,0 +1,74 @@
+{
+  "entities": {
+    "Assessment": {
+      "title": "Skill Assessment",
+      "description": "A record of a candidate's skill assessment against a job description.",
+      "type": "object",
+      "properties": {
+        "candidateName": { "type": "string" },
+        "targetJobTitle": { "type": "string" },
+        "resumeText": { "type": "string" },
+        "jobDescription": { "type": "string" },
+        "matchPercentage": { "type": "number" },
+        "skills": {
+          "type": "array",
+          "description": "List of skills with proficiency levels.",
+          "items": {
+            "type": "object",
+            "properties": {
+              "name": { "type": "string" },
+              "level": { "type": "string", "enum": ["Novice", "Intermediate", "Expert"] },
+              "score": { "type": "number" }
+            }
+          }
+        },
+        "gaps": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "name": { "type": "string" },
+              "severity": { "type": "string", "enum": ["Low", "Medium", "High"] }
+            }
+          }
+        },
+        "learningPlan": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "step": { "type": "number" },
+              "title": { "type": "string" },
+              "description": { "type": "string" },
+              "resources": { "type": "array", "items": { "type": "string" } },
+              "timeEstimate": { "type": "string" }
+            }
+          }
+        },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      }
+    },
+    "Message": {
+      "title": "Chat Message",
+      "description": "A message in the assessment conversation.",
+      "type": "object",
+      "properties": {
+        "assessmentId": { "type": "string" },
+        "sender": { "type": "string", "enum": ["user", "ai"] },
+        "text": { "type": "string" },
+        "timestamp": { "type": "string", "format": "date-time" }
+      }
+    }
+  },
+  "firestore": {
+    "/assessments/{assessmentId}": {
+      "schema": "Assessment",
+      "description": "Stores user assessments."
+    },
+    "/assessments/{assessmentId}/messages/{messageId}": {
+      "schema": "Message",
+      "description": "Stores chat messages for an assessment."
+    }
+  }
+}

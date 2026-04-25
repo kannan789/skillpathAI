@@ -1,0 +1,36 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // Default deny
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isOwner(userId) {
+      return isSignedIn() && request.auth.uid == userId;
+    }
+
+    function isValidAssessment(data) {
+      return data.keys().hasAll(['candidateName', 'targetJobTitle', 'createdAt', 'updatedAt']) &&
+             data.candidateName is string && data.candidateName.size() <= 200 &&
+             data.targetJobTitle is string && data.targetJobTitle.size() <= 200;
+    }
+
+    match /assessments/{assessmentId} {
+      // For simplicity in this demo, we allow anyone signed in to create/read their own or new assessments
+      // In a real app, we'd link assessmentId to a userId
+      allow create: if isSignedIn() && isValidAssessment(request.resource.data);
+      allow get, list: if isSignedIn();
+      allow update: if isSignedIn() && isValidAssessment(request.resource.data);
+      allow delete: if false;
+
+      match /messages/{messageId} {
+        allow read, write: if isSignedIn();
+      }
+    }
+  }
+}
