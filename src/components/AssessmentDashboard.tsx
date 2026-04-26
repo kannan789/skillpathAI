@@ -168,7 +168,7 @@ export default function AssessmentDashboard({ assessmentId }: AssessmentDashboar
         const planRows = assessment.learningPlan.map((step: any, i: number) => [
           `Step ${i + 1}: ${step.title}`,
           step.timeEstimate,
-          `${step.description}\n\nRESOURCES:\n${step.resources.join('\n')}`
+          `${step.description}\n\nRESOURCES:\n${step.resources.map((r: string) => r.trim()).join('\n')}`
         ]);
         
         autoTable(doc, {
@@ -180,24 +180,76 @@ export default function AssessmentDashboard({ assessmentId }: AssessmentDashboar
           columnStyles: {
             0: { cellWidth: 40 },
             1: { cellWidth: 25 },
-            2: { cellWidth: 120 }
+            2: { cellWidth: 120, textColor: 30 } // Main color
           },
           didDrawCell: (data) => {
             if (data.section === 'body' && data.column.index === 2) {
-              const text = data.cell.text.join('\n');
-              const lines = data.cell.text;
-              let currentLineY = data.cell.y + 5; // starting padding
+              const cell = data.cell;
+              const resourcesLineIndex = cell.text.findIndex(l => l.includes('RESOURCES:'));
               
-              lines.forEach((line) => {
-                if (line.trim().startsWith('http')) {
-                  const url = line.trim();
-                  // Note: Finding exact X within a wrapped cell is hard, 
-                  // but here we know each resource is on its own line after the "RESOURCES:" header.
-                  // We'll just make the text area clickable if it looks like a URL.
-                  doc.link(data.cell.x + 5, currentLineY - 3, doc.getTextWidth(url), 5, { url });
+              if (resourcesLineIndex === -1) return;
+
+              // We'll redraw the resources part with custom styling
+              // First, we find the vertical start position of the resources section
+              const lineHeightFactor = 1.15;
+              const lineHeight = (cell.styles.fontSize * lineHeightFactor) / doc.internal.scaleFactor;
+              
+              // Erase existing text for resources section to avoid distortion (double printing)
+              const startEraseY = cell.y + cell.padding('top') + (lineHeight * resourcesLineIndex);
+              const eraseHeight = cell.height - (cell.padding('top') + cell.padding('bottom')) - (lineHeight * resourcesLineIndex);
+              
+              // Use the cell's background color to "clear" the area
+              const bg = cell.styles.fillColor;
+              if (bg) {
+                if (Array.isArray(bg)) doc.setFillColor(bg[0], bg[1], bg[2]);
+                else doc.setFillColor(bg as any);
+              } else {
+                doc.setFillColor(255, 255, 255);
+              }
+              
+              doc.rect(
+                cell.x + cell.padding('left'), 
+                startEraseY, 
+                cell.width - cell.padding('left') - cell.padding('right'), 
+                eraseHeight, 
+                'F'
+              );
+
+              // Draw "RESOURCES:" in bold indigo
+              doc.setFont('helvetica', 'bold');
+              doc.setTextColor(79, 70, 229);
+              doc.text(
+                'RESOURCES:', 
+                cell.x + cell.padding('left'), 
+                startEraseY + (cell.styles.fontSize / doc.internal.scaleFactor)
+              );
+              
+              // Restore normal font for URLs
+              doc.setFont('helvetica', 'normal');
+              
+              // Iterate through subsequent lines which are URLs
+              for (let i = resourcesLineIndex + 1; i < cell.text.length; i++) {
+                const line = cell.text[i].trim();
+                if (line) {
+                  doc.setTextColor(79, 70, 229); // Indigo-600
+                  const x = cell.x + cell.padding('left');
+                  const y = cell.y + cell.padding('top') + (lineHeight * i) + (cell.styles.fontSize / doc.internal.scaleFactor);
+                  
+                  // Text width for underline
+                  const textWidth = doc.getTextWidth(line);
+                  
+                  // Draw text and underline
+                  doc.text(line, x, y);
+                  doc.setDrawColor(79, 70, 229);
+                  doc.setLineWidth(0.1);
+                  doc.line(x, y + 0.5, x + textWidth, y + 0.5);
+                  
+                  // Add link
+                  doc.link(x, y - (cell.styles.fontSize / doc.internal.scaleFactor), textWidth, lineHeight, { url: line });
                 }
-                currentLineY += (data.cell.styles.fontSize * 0.4); // rough leading
-              });
+              }
+              // Reset for other cells
+              doc.setTextColor(30, 41, 59);
             }
           }
         });
