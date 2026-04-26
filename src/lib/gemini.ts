@@ -23,6 +23,7 @@ export interface LearningStep {
 
 export interface AssessmentData {
   matchPercentage: number;
+  targetJobTitle: string;
   skills: Skill[];
   gaps: Gap[];
 }
@@ -31,8 +32,9 @@ export async function parseResumeAndJD(resume: string, jd: string): Promise<Asse
   const prompt = `
     Analyze the following Resume and Job Description. 
     1. Calculate a match percentage.
-    2. Extract core skills from the JD and assess the candidate's proficiency based on the resume (Expert, Intermediate, Novice).
-    3. Identify critical skill gaps.
+    2. Extract the 'targetJobTitle' (the specific role title from the job description).
+    3. Extract core skills from the JD and assess the candidate's proficiency based on the resume (Expert, Intermediate, Novice).
+    4. Identify critical skill gaps.
 
     Resume: ${resume}
     Job Description: ${jd}
@@ -47,6 +49,7 @@ export async function parseResumeAndJD(resume: string, jd: string): Promise<Asse
         type: Type.OBJECT,
         properties: {
           matchPercentage: { type: Type.NUMBER },
+          targetJobTitle: { type: Type.STRING },
           skills: {
             type: Type.ARRAY,
             items: {

@@ -130,7 +130,7 @@ export default function App() {
       const docRef = await addDoc(collection(db, 'assessments'), {
         ...data,
         candidateName: user?.displayName || "Elena Vance",
-        targetJobTitle: "Senior Role", // AI can extract this better later
+        targetJobTitle: data.targetJobTitle || "Senior Developer",
         resumeText: resume,
         jobDescription: jobDesc,
         userId: user?.uid,
@@ -141,7 +141,7 @@ export default function App() {
       // Initial AI message
       await addDoc(collection(db, 'assessments', docRef.id, 'messages'), {
         sender: 'ai',
-        text: `Hello ${user?.displayName || "there"}! I've analyzed your resume against the job description. I've identified a ${data.matchPercentage}% match. Let's dive into your core skills and bridge any gaps.`,
+        text: `Hello ${user?.displayName || "there"}! I've analyzed your resume against the job description for ${data.targetJobTitle || "this role"}. I've identified a ${data.matchPercentage}% match. Let's dive into your core skills and bridge any gaps.`,
         timestamp: new Date()
       });
 
@@ -188,7 +188,17 @@ export default function App() {
   }
 
   if (activeAssessmentId) {
-    return <AssessmentDashboard assessmentId={activeAssessmentId} />;
+    return (
+      <AssessmentDashboard 
+        assessmentId={activeAssessmentId} 
+        onNewAssessment={() => {
+          setActiveAssessmentId(null);
+          setResume('');
+          setJobDesc('');
+          setFileName(null);
+        }} 
+      />
+    );
   }
 
   return (

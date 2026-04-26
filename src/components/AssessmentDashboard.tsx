@@ -15,8 +15,11 @@ import {
   CheckCircle2,
   Download,
   Search,
-  Loader2
+  Loader2,
+  Plus,
+  LogOut
 } from 'lucide-react';
+import { signOut } from 'firebase/auth';
 import { motion, AnimatePresence } from 'motion/react';
 import { cn } from '../lib/utils';
 import { parseResumeAndJD, generateLearningPlan, getAgentResponse, type AssessmentData, type Skill, type Gap, type LearningStep } from '../lib/gemini';
@@ -32,9 +35,10 @@ interface Message {
 
 interface AssessmentDashboardProps {
   assessmentId: string;
+  onNewAssessment: () => void;
 }
 
-export default function AssessmentDashboard({ assessmentId }: AssessmentDashboardProps) {
+export default function AssessmentDashboard({ assessmentId, onNewAssessment }: AssessmentDashboardProps) {
   const [assessment, setAssessment] = useState<any>(null);
   const [messages, setMessages] = useState<Message[]>([]);
   const [inputText, setInputText] = useState('');
@@ -190,32 +194,29 @@ export default function AssessmentDashboard({ assessmentId }: AssessmentDashboar
               if (resourcesLineIndex === -1) return;
 
               // We'll redraw the resources part with custom styling
-              // First, we find the vertical start position of the resources section
               const lineHeightFactor = 1.15;
               const lineHeight = (cell.styles.fontSize * lineHeightFactor) / doc.internal.scaleFactor;
               
-              // Erase existing text for resources section to avoid distortion (double printing)
+              // Cover the area to avoid distortion
               const startEraseY = cell.y + cell.padding('top') + (lineHeight * resourcesLineIndex);
               const eraseHeight = cell.height - (cell.padding('top') + cell.padding('bottom')) - (lineHeight * resourcesLineIndex);
               
-              // Use the cell's background color to "clear" the area
-              const bg = cell.styles.fillColor;
-              if (bg) {
-                if (Array.isArray(bg)) doc.setFillColor(bg[0], bg[1], bg[2]);
-                else doc.setFillColor(bg as any);
+              // Robust background color detection
+              if (data.row.index % 2 === 0) {
+                doc.setFillColor(255, 255, 255); // White for even rows (standard striped)
               } else {
-                doc.setFillColor(255, 255, 255);
+                doc.setFillColor(245, 247, 250); // Light gray for odd rows
               }
               
               doc.rect(
-                cell.x + cell.padding('left'), 
-                startEraseY, 
-                cell.width - cell.padding('left') - cell.padding('right'), 
-                eraseHeight, 
+                cell.x + 1, // Slight offset to avoid border issues
+                startEraseY - 1, 
+                cell.width - 2, 
+                eraseHeight + 2, 
                 'F'
               );
 
-              // Draw "RESOURCES:" in bold indigo
+              // Draw Header
               doc.setFont('helvetica', 'bold');
               doc.setTextColor(79, 70, 229);
               doc.text(
@@ -224,22 +225,19 @@ export default function AssessmentDashboard({ assessmentId }: AssessmentDashboar
                 startEraseY + (cell.styles.fontSize / doc.internal.scaleFactor)
               );
               
-              // Restore normal font for URLs
               doc.setFont('helvetica', 'normal');
               
-              // Iterate through subsequent lines which are URLs
               for (let i = resourcesLineIndex + 1; i < cell.text.length; i++) {
                 const line = cell.text[i].trim();
                 if (line) {
-                  doc.setTextColor(79, 70, 229); // Indigo-600
+                  doc.setTextColor(79, 70, 229);
                   const x = cell.x + cell.padding('left');
                   const y = cell.y + cell.padding('top') + (lineHeight * i) + (cell.styles.fontSize / doc.internal.scaleFactor);
                   
-                  // Text width for underline
                   const textWidth = doc.getTextWidth(line);
-                  
-                  // Draw text and underline
                   doc.text(line, x, y);
+                  
+                  // Underline with matching color
                   doc.setDrawColor(79, 70, 229);
                   doc.setLineWidth(0.1);
                   doc.line(x, y + 0.5, x + textWidth, y + 0.5);
@@ -248,8 +246,9 @@ export default function AssessmentDashboard({ assessmentId }: AssessmentDashboar
                   doc.link(x, y - (cell.styles.fontSize / doc.internal.scaleFactor), textWidth, lineHeight, { url: line });
                 }
               }
-              // Reset for other cells
+              // Reset
               doc.setTextColor(30, 41, 59);
+              doc.setFont('helvetica', 'normal');
             }
           }
         });
@@ -262,7 +261,21 @@ export default function AssessmentDashboard({ assessmentId }: AssessmentDashboar
       doc.setTextColor(148, 163, 184);
       doc.text('This roadmap is AI-generated based on your current assessment. Continuous learning is key to career growth.', pageWidth / 2, lastY > 280 ? 285 : lastY, { align: 'center' });
       
-      doc.save(`Verification_Report_${assessment.candidateName.replace(/\s+/g, '_')}.pdf`);
+      const fileName = `Assessment_Report_${assessment.candidateName.replace(/\s+/g, '_')}.pdf`;
+      doc.save(fileName);
+
+      // Fallback for some iframe environments if doc.save fails or is blocked
+      if (window.parent !== window) {
+        setTimeout(() => {
+          const blob = doc.output('blob');
+          const url = URL.createObjectURL(blob);
+          const a = document.createElement('a');
+          a.href = url;
+          a.download = fileName;
+          a.click();
+          URL.revokeObjectURL(url);
+        }, 500);
+      }
     } catch (error) {
       console.error('Export error:', error);
       alert('Failed to generate PDF. Please try again.');
@@ -397,26 +410,40 @@ export default function AssessmentDashboard({ assessmentId }: AssessmentDashboar
             <h1 className="text-2xl font-bold text-slate-900">{assessment.candidateName}</h1>
             <p className="text-slate-500 text-sm">Targeting: <span className="font-semibold">{assessment.targetJobTitle}</span></p>
           </div>
-          <div className="flex gap-3">
-            <span className={cn(
-              "px-3 py-1.5 rounded-full text-xs font-bold uppercase tracking-wider flex items-center gap-2",
-              assessment.matchPercentage > 80 ? "bg-green-100 text-green-700" : "bg-orange-100 text-orange-700"
-            )}>
-              {assessment.matchPercentage}% Match
-            </span>
-            <button 
-              onClick={handleExportPlan}
-              disabled={isExporting}
-              className="px-4 py-2 bg-slate-900 hover:bg-slate-800 disabled:bg-slate-700 text-white rounded-lg text-sm font-medium flex items-center gap-2 transition-colors"
-            >
-              {isExporting ? (
-                <Loader2 className="w-4 h-4 animate-spin" />
-              ) : (
-                <Download className="w-4 h-4" />
-              )}
-              {isExporting ? 'Generating...' : 'Export Plan'}
-            </button>
-          </div>
+            <div className="flex gap-3">
+              <span className={cn(
+                "px-3 py-1.5 rounded-full text-xs font-bold uppercase tracking-wider flex items-center gap-2",
+                assessment.matchPercentage > 80 ? "bg-green-100 text-green-700" : "bg-orange-100 text-orange-700"
+              )}>
+                {assessment.matchPercentage}% Match
+              </span>
+              <button 
+                onClick={onNewAssessment}
+                className="px-4 py-2 bg-white border border-slate-200 hover:bg-slate-50 text-slate-700 rounded-lg text-sm font-medium flex items-center gap-2 transition-colors shadow-sm"
+              >
+                <Plus className="w-4 h-4" />
+                New Report
+              </button>
+              <button 
+                onClick={handleExportPlan}
+                disabled={isExporting}
+                className="px-4 py-2 bg-slate-900 hover:bg-slate-800 disabled:bg-slate-700 text-white rounded-lg text-sm font-medium flex items-center gap-2 transition-colors shadow-sm"
+              >
+                {isExporting ? (
+                  <Loader2 className="w-4 h-4 animate-spin" />
+                ) : (
+                  <Download className="w-4 h-4" />
+                )}
+                {isExporting ? 'Generating...' : 'Export Plan'}
+              </button>
+              <button 
+                onClick={() => signOut(auth)}
+                className="p-2 text-slate-400 hover:text-rose-500 transition-colors"
+                title="Log Out"
+              >
+                <LogOut className="w-5 h-5" />
+              </button>
+            </div>
         </header>
 
         {/* Assessment Dashboard */}
