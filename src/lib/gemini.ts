@@ -83,6 +83,8 @@ export async function generateLearningPlan(data: AssessmentData, assessmentTrans
     generate a personalized 3-step learning plan.
     Focus on "adjacent skills" that are realistically acquirable given their current performance.
     
+    IMPORTANT: For each step, provide exactly 2-3 high-quality learning resources as FULL URLs (e.g. "https://react.dev/learn", "https://developer.mozilla.org/...", etc.). DO NOT provide plain text names, ONLY working URLs.
+    
     Technical Interview Transcript:
     ${assessmentTranscript || "No transcript available. Use resume data."}
 

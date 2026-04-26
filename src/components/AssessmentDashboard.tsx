@@ -14,12 +14,15 @@ import {
   Brain,
   CheckCircle2,
   Download,
-  Search
+  Search,
+  Loader2
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { cn } from '../lib/utils';
 import { parseResumeAndJD, generateLearningPlan, getAgentResponse, type AssessmentData, type Skill, type Gap, type LearningStep } from '../lib/gemini';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Cell } from 'recharts';
+import jsPDF from 'jspdf';
+import autoTable from 'jspdf-autotable';
 
 interface Message {
   sender: 'user' | 'ai';
@@ -38,6 +41,7 @@ export default function AssessmentDashboard({ assessmentId }: AssessmentDashboar
   const [isSending, setIsSending] = useState(false);
   const [isGeneratingPlan, setIsGeneratingPlan] = useState(false);
   const [isInterviewing, setIsInterviewing] = useState(false);
+  const [isExporting, setIsExporting] = useState(false);
   const chatEndRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -66,6 +70,154 @@ export default function AssessmentDashboard({ assessmentId }: AssessmentDashboar
   useEffect(() => {
     chatEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages]);
+
+  const handleExportPlan = async () => {
+    if (!assessment || isExporting) return;
+    setIsExporting(true);
+
+    try {
+      const doc = new jsPDF();
+      const pageWidth = doc.internal.pageSize.getWidth();
+      
+      // Header
+      doc.setFillColor(79, 70, 229); // Indigo-600
+      doc.rect(0, 0, pageWidth, 40, 'F');
+      
+      doc.setTextColor(255, 255, 255);
+      doc.setFontSize(22);
+      doc.setFont('helvetica', 'bold');
+      doc.text('SkillPath AI Career Report', 15, 25);
+      
+      doc.setFontSize(10);
+      doc.setFont('helvetica', 'normal');
+      doc.text(`Generated on ${new Date().toLocaleDateString()}`, pageWidth - 15, 25, { align: 'right' });
+      
+      // Candidate Info
+      doc.setTextColor(30, 41, 59); // Slate-800
+      doc.setFontSize(16);
+      doc.setFont('helvetica', 'bold');
+      doc.text(assessment.candidateName, 15, 55);
+      
+      doc.setFontSize(12);
+      doc.setFont('helvetica', 'normal');
+      doc.text(`Target Role: ${assessment.targetJobTitle}`, 15, 63);
+      
+      // Match Score Circle (Simplified as text block)
+      doc.setDrawColor(79, 70, 229);
+      doc.setLineWidth(0.5);
+      doc.roundedRect(pageWidth - 65, 48, 50, 20, 3, 3, 'D');
+      doc.setFont('helvetica', 'bold');
+      doc.setTextColor(79, 70, 229);
+      doc.setFontSize(18);
+      doc.text(`${assessment.matchPercentage}%`, pageWidth - 40, 60, { align: 'center' });
+      doc.setFontSize(8);
+      doc.text('MATCH SCORE', pageWidth - 40, 65, { align: 'center' });
+      
+      // Skills Section
+      doc.setTextColor(30, 41, 59);
+      doc.setFontSize(14);
+      doc.setFont('helvetica', 'bold');
+      doc.text('Proficiency Analysis', 15, 85);
+      
+      const skillRows = assessment.skills.map((s: any) => [
+        s.name, 
+        `${s.score}%`, 
+        s.score >= 70 ? 'Proficient' : s.score >= 40 ? 'Intermediate' : 'Beginner'
+      ]);
+      
+      autoTable(doc, {
+        startY: 90,
+        head: [['Skill Name', 'Score', 'Level']],
+        body: skillRows,
+        theme: 'striped',
+        headStyles: { fillColor: [79, 70, 229] }, // Indigo-600
+        styles: { fontSize: 10 }
+      });
+      
+      // Gaps Section
+      let currentY = (doc as any).lastAutoTable.finalY + 15;
+      doc.setFontSize(14);
+      doc.setFont('helvetica', 'bold');
+      doc.text('Identified Skill Gaps', 15, currentY);
+      
+      const gapRows = assessment.gaps.map((g: any) => [g.name, g.severity, g.description || 'Action required to bridge this gap.']);
+      
+      autoTable(doc, {
+        startY: currentY + 5,
+        head: [['Gap Area', 'Severity', 'Description']],
+        body: gapRows,
+        theme: 'grid',
+        headStyles: { fillColor: [244, 63, 94] }, // rose-500
+        styles: { fontSize: 9 }
+      });
+      
+      // Learning Plan Section
+      if (assessment.learningPlan) {
+        currentY = (doc as any).lastAutoTable.finalY + 15;
+        
+        // Add new page if needed
+        if (currentY > 240) {
+          doc.addPage();
+          currentY = 20;
+        }
+        
+        doc.setFontSize(14);
+        doc.setFont('helvetica', 'bold');
+        doc.text('Learning Roadmap', 15, currentY);
+        
+        const planRows = assessment.learningPlan.map((step: any, i: number) => [
+          `Step ${i + 1}: ${step.title}`,
+          step.timeEstimate,
+          `${step.description}\n\nRESOURCES:\n${step.resources.join('\n')}`
+        ]);
+        
+        autoTable(doc, {
+          startY: currentY + 5,
+          head: [['Milestone', 'Estimate', 'Action Details & Resources']],
+          body: planRows,
+          theme: 'striped',
+          styles: { fontSize: 9, cellPadding: 5 },
+          columnStyles: {
+            0: { cellWidth: 40 },
+            1: { cellWidth: 25 },
+            2: { cellWidth: 120 }
+          },
+          didDrawCell: (data) => {
+            if (data.section === 'body' && data.column.index === 2) {
+              const text = data.cell.text.join('\n');
+              const lines = data.cell.text;
+              let currentLineY = data.cell.y + 5; // starting padding
+              
+              lines.forEach((line) => {
+                if (line.trim().startsWith('http')) {
+                  const url = line.trim();
+                  // Note: Finding exact X within a wrapped cell is hard, 
+                  // but here we know each resource is on its own line after the "RESOURCES:" header.
+                  // We'll just make the text area clickable if it looks like a URL.
+                  doc.link(data.cell.x + 5, currentLineY - 3, doc.getTextWidth(url), 5, { url });
+                }
+                currentLineY += (data.cell.styles.fontSize * 0.4); // rough leading
+              });
+            }
+          }
+        });
+      }
+      
+      // Footer text on the last page
+      const lastY = (doc as any).lastAutoTable.finalY + 20;
+      doc.setFontSize(10);
+      doc.setFont('helvetica', 'italic');
+      doc.setTextColor(148, 163, 184);
+      doc.text('This roadmap is AI-generated based on your current assessment. Continuous learning is key to career growth.', pageWidth / 2, lastY > 280 ? 285 : lastY, { align: 'center' });
+      
+      doc.save(`Verification_Report_${assessment.candidateName.replace(/\s+/g, '_')}.pdf`);
+    } catch (error) {
+      console.error('Export error:', error);
+      alert('Failed to generate PDF. Please try again.');
+    } finally {
+      setIsExporting(false);
+    }
+  };
 
   const handleSendMessage = async (e?: React.FormEvent) => {
     e?.preventDefault();
@@ -200,9 +352,17 @@ export default function AssessmentDashboard({ assessmentId }: AssessmentDashboar
             )}>
               {assessment.matchPercentage}% Match
             </span>
-            <button className="px-4 py-2 bg-slate-900 hover:bg-slate-800 text-white rounded-lg text-sm font-medium flex items-center gap-2 transition-colors">
-              <Download className="w-4 h-4" />
-              Export Plan
+            <button 
+              onClick={handleExportPlan}
+              disabled={isExporting}
+              className="px-4 py-2 bg-slate-900 hover:bg-slate-800 disabled:bg-slate-700 text-white rounded-lg text-sm font-medium flex items-center gap-2 transition-colors"
+            >
+              {isExporting ? (
+                <Loader2 className="w-4 h-4 animate-spin" />
+              ) : (
+                <Download className="w-4 h-4" />
+              )}
+              {isExporting ? 'Generating...' : 'Export Plan'}
             </button>
           </div>
         </header>
@@ -217,28 +377,30 @@ export default function AssessmentDashboard({ assessmentId }: AssessmentDashboar
                 <TrendingUp className="w-4 h-4 text-slate-400" />
               </div>
               
-              <div className="h-[240px] w-full">
-                <ResponsiveContainer width="100%" height="100%">
-                  <BarChart data={assessment.skills} layout="vertical" margin={{ left: 10, right: 30 }}>
-                    <XAxis type="number" hide domain={[0, 100]} />
-                    <YAxis 
-                      dataKey="name" 
-                      type="category" 
-                      width={120} 
-                      axisLine={false}
-                      tick={{ fontSize: 11, fontWeight: 500 }}
-                    />
-                    <Tooltip 
-                      cursor={{ fill: '#f8fafc' }}
-                      contentStyle={{ borderRadius: '8px', border: 'none', boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)' }}
-                    />
-                    <Bar dataKey="score" radius={[0, 4, 4, 0]} barSize={20}>
-                      {assessment.skills?.map((entry: any, index: number) => (
-                        <Cell key={`cell-${index}`} fill={entry.score > 70 ? '#4f46e5' : entry.score > 40 ? '#f97316' : '#94a3b8'} />
-                      ))}
-                    </Bar>
-                  </BarChart>
-                </ResponsiveContainer>
+              <div className="max-h-[300px] overflow-y-auto pr-2 custom-scrollbar">
+                <div style={{ height: Math.max(240, (assessment.skills?.length || 0) * 40) + 'px' }}>
+                  <ResponsiveContainer width="100%" height="100%">
+                    <BarChart data={assessment.skills} layout="vertical" margin={{ left: 10, right: 30 }}>
+                      <XAxis type="number" hide domain={[0, 100]} />
+                      <YAxis 
+                        dataKey="name" 
+                        type="category" 
+                        width={120} 
+                        axisLine={false}
+                        tick={{ fontSize: 11, fontWeight: 500 }}
+                      />
+                      <Tooltip 
+                        cursor={{ fill: '#f8fafc' }}
+                        contentStyle={{ borderRadius: '8px', border: 'none', boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)' }}
+                      />
+                      <Bar dataKey="score" radius={[0, 4, 4, 0]} barSize={20}>
+                        {assessment.skills?.map((entry: any, index: number) => (
+                          <Cell key={`cell-${index}`} fill={entry.score > 70 ? '#4f46e5' : entry.score > 40 ? '#f97316' : '#94a3b8'} />
+                        ))}
+                      </Bar>
+                    </BarChart>
+                  </ResponsiveContainer>
+                </div>
               </div>
             </div>
 
@@ -247,7 +409,7 @@ export default function AssessmentDashboard({ assessmentId }: AssessmentDashboar
                 <h3 className="text-xs font-bold text-slate-400 uppercase tracking-widest">Job Gap Detection</h3>
                 <AlertCircle className="w-4 h-4 text-slate-400" />
               </div>
-              <div className="flex flex-wrap gap-3">
+              <div className="flex flex-wrap gap-3 max-h-[300px] overflow-y-auto pr-2 custom-scrollbar">
                 {assessment.gaps?.map((gap: Gap, i: number) => (
                   <div 
                     key={i}
@@ -353,12 +515,18 @@ export default function AssessmentDashboard({ assessmentId }: AssessmentDashboar
                       <p className="text-[10px] font-bold text-indigo-600 mb-2 border-b border-indigo-100 pb-1">RESOURCES</p>
                       <div className="space-y-2">
                         {step.resources.map((res: string, j: number) => (
-                          <div key={j} className="flex items-center gap-2 group/link">
+                          <a 
+                            key={j} 
+                            href={res.startsWith('http') ? res : `https://www.google.com/search?q=${encodeURIComponent(res)}`}
+                            target="_blank" 
+                            rel="noopener noreferrer"
+                            className="flex items-center gap-2 group/link"
+                          >
                             <ExternalLink className="w-3 h-3 text-indigo-400 group-hover/link:text-indigo-600" />
-                            <span className="text-[11px] text-indigo-500 underline truncate font-medium cursor-pointer hover:text-indigo-700">
+                            <span className="text-[11px] text-indigo-500 underline truncate font-medium hover:text-indigo-700">
                               {res}
                             </span>
-                          </div>
+                          </a>
                         ))}
                       </div>
                     </div>
